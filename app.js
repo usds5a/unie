@@ -533,6 +533,7 @@ async function syncLeads() {
             };
 
             const proxies = [
+                'direct',
                 'https://corsproxy.io/?',
                 'https://api.allorigins.win/raw?url=',
                 'https://thingproxy.freeboard.io/fetch/'
@@ -544,18 +545,22 @@ async function syncLeads() {
 
             for (const proxyBase of proxies) {
                 try {
-                    logToSyncDebug(`🔄 Probando vía: ${proxyBase.split('/')[2]}...`);
+                    const isDirect = proxyBase === 'direct';
+                    const proxyName = isDirect ? 'DIRECTO' : proxyBase.split('/')[2];
+                    logToSyncDebug(`🔄 Probando vía: ${proxyName}...`);
 
-                    const finalUrl = proxyBase + encodeURI(API_CONFIG.URL);
+                    const finalUrl = isDirect ? API_CONFIG.URL : (proxyBase + encodeURI(API_CONFIG.URL));
 
                     const controller = new AbortController();
-                    const timeoutId = setTimeout(() => controller.abort(), 15000);
+                    const timeoutId = setTimeout(() => controller.abort(), 10000);
 
                     response = await fetch(finalUrl, {
                         method: 'POST',
                         headers: activeHeaders,
                         body: JSON.stringify(apiPayload),
-                        signal: controller.signal
+                        signal: controller.signal,
+                        mode: isDirect ? 'cors' : 'cors',
+                        cache: 'no-cache'
                     });
 
                     clearTimeout(timeoutId);
@@ -566,7 +571,8 @@ async function syncLeads() {
                     }
                 } catch (err) {
                     lastErrorMsg = err.message;
-                    logToSyncDebug(`⚠️ Error en este túnel: ${err.message}`);
+                    const pName = proxyBase === 'direct' ? 'DIRECTO' : proxyBase.split('/')[2];
+                    logToSyncDebug(`⚠️ ${pName} falló: ${err.message}`);
                 }
             }
 
