@@ -516,7 +516,7 @@ async function syncLeads() {
     let successCount = 0;
     let failCount = 0;
 
-    logToSyncDebug("--- VERSIÓN 5.0 (Conexión Universal) ---");
+    logToSyncDebug("--- VERSIÓN 6.0 (Diagnóstico Maestro) ---");
 
     for (let i = 0; i < pendingLeads.length; i++) {
         const lead = pendingLeads[i];
@@ -527,19 +527,19 @@ async function syncLeads() {
             const apiPayload = mapLeadToApiPayload(lead);
             const cleanApiKey = apiKey.trim();
 
-            // Lista de proxies probados y configurados
-            const proxies = [
-                'https://corsproxy.io/?',
-                'https://api.allorigins.win/raw?url=',
-                'https://thingproxy.freeboard.io/fetch/'
+            // Configuración individual para cada proxy
+            const proxyConfigs = [
+                { name: 'CORS-Proxy (Directo)', url: 'https://corsproxy.io/?' + API_CONFIG.URL },
+                { name: 'AllOrigins (Encoded)', url: 'https://api.allorigins.win/raw?url=' + encodeURIComponent(API_CONFIG.URL) },
+                { name: 'ThingProxy (Raw)', url: 'https://thingproxy.freeboard.io/fetch/' + API_CONFIG.URL }
             ];
 
             let response;
             let successRaw = false;
 
-            // 1. INTENTO DIRECTO (A veces el navegador lo permite si la API está bien configurada)
+            // 1. INTENTO DIRECTO
             try {
-                logToSyncDebug(`🔄 Intento directo...`);
+                logToSyncDebug(`🔄 Probando: DIRECTO...`);
                 response = await fetch(API_CONFIG.URL, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json', 'api-key': cleanApiKey, 'env': apiEnv },
@@ -547,36 +547,39 @@ async function syncLeads() {
                 });
                 if (response.ok || response.status < 500) successRaw = true;
             } catch (e) {
-                logToSyncDebug(`⚠️ Directo falló (CORS). Probando túneles...`);
+                logToSyncDebug(`⚠️ Directo bloqueado por el navegador (CORS).`);
             }
 
-            // 2. INTENTO POR TÚNELES (Si el directo falla)
+            // 2. INTENTO POR TÚNELES
             if (!successRaw) {
-                for (const proxyBase of proxies) {
+                for (const config of proxyConfigs) {
                     try {
-                        const proxyName = proxyBase.split('/')[2];
-                        const finalUrl = proxyBase + encodeURIComponent(API_CONFIG.URL);
-                        logToSyncDebug(`🔄 Túnel: ${proxyName}...`);
-
-                        response = await fetch(finalUrl, {
+                        logToSyncDebug(`🔄 Probando: ${config.name}...`);
+                        response = await fetch(config.url, {
                             method: 'POST',
-                            headers: { 'Content-Type': 'application/json', 'api-key': cleanApiKey, 'env': apiEnv },
+                            headers: {
+                                'Content-Type': 'application/json',
+                                'api-key': cleanApiKey,
+                                'env': apiEnv
+                            },
                             body: JSON.stringify(apiPayload)
                         });
 
                         if (response.ok || response.status < 500) {
                             successRaw = true;
                             break;
+                        } else {
+                            logToSyncDebug(`❌ Server respondió: ${response.status}`);
                         }
                     } catch (err) {
-                        logToSyncDebug(`❌ Falló túnel.`);
+                        logToSyncDebug(`❌ Error en ${config.name}: ${err.message}`);
                     }
                 }
             }
 
             if (successRaw && response && response.ok) {
                 const responseData = await response.json();
-                logToSyncDebug(`✅ ¡SINCRONIZADO!`);
+                logToSyncDebug(`✅ ¡LOGRADO! Lead sincronizado.`);
                 localStorage.setItem('last_api_response', JSON.stringify(responseData, null, 2));
 
                 await db.leads.update(lead.id, {
@@ -599,13 +602,13 @@ async function syncLeads() {
                 });
                 successCount++;
             } else if (response) {
-                logToSyncDebug(`❌ Error del servidor: ${response.status}`);
+                logToSyncDebug(`❌ Error final del server: ${response.status}`);
                 failCount++;
             } else {
-                throw new Error("No hay conexión.");
+                throw new Error("Ninguna vía de conexión funcionó.");
             }
         } catch (error) {
-            logToSyncDebug(`❌ Error crítico: ${error.message}`);
+            logToSyncDebug(`❌ RESULTADO: ${error.message}`);
             failCount++;
         }
     }
