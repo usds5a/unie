@@ -481,7 +481,7 @@ function logToSyncDebug(msg) {
 }
 
 async function syncLeads() {
-    logToSyncDebug("--- Iniciando Sincronización (v12.0) ---");
+    logToSyncDebug("--- Iniciando Sincronización (v99.0) ---");
 
     if (!isOnline) {
         alert("Error: No hay conexión a internet.");
@@ -525,11 +525,10 @@ async function syncLeads() {
             const apiPayload = mapLeadToApiPayload(lead);
             const bodyStr = JSON.stringify(apiPayload);
 
-            // Estrategia Multi-Túnel Optimizada para GitHub Pages (HTTPS/CORS)
+            // GitHub Pages prefiere AllOrigins porque no añade cabeceras prohibidas
             const proxyAttempts = [
-                { name: "Directo", url: API_CONFIG.URL },
-                { name: "CORS-Proxy", url: "https://corsproxy.io/?" + encodeURIComponent(API_CONFIG.URL) },
                 { name: "AllOrigins", url: "https://api.allorigins.win/raw?url=" + encodeURIComponent(API_CONFIG.URL) },
+                { name: "CORS-Proxy", url: "https://corsproxy.io/?" + encodeURIComponent(API_CONFIG.URL) },
                 { name: "ThingProxy", url: "https://thingproxy.freeboard.io/fetch/" + API_CONFIG.URL }
             ];
 
@@ -538,10 +537,10 @@ async function syncLeads() {
 
             for (const proxy of proxyAttempts) {
                 try {
-                    logToSyncDebug(`🔄 Probando: ${proxy.name}...`);
+                    logToSyncDebug(`🔄 Probando vía: ${proxy.name}...`);
 
                     const controller = new AbortController();
-                    const timeoutId = setTimeout(() => controller.abort(), 15000);
+                    const timeoutId = setTimeout(() => controller.abort(), 25000); // 25 segundos
 
                     response = await fetch(proxy.url, {
                         method: 'POST',
@@ -557,9 +556,11 @@ async function syncLeads() {
                     if (response.ok || response.status < 500) {
                         successRaw = true;
                         break;
+                    } else {
+                        logToSyncDebug(`⚠️ ${proxy.name} respondió ${response.status}`);
                     }
                 } catch (e) {
-                    logToSyncDebug(`⚠️ ${proxy.name} falló.`);
+                    logToSyncDebug(`⚠️ ${proxy.name} falló (Error Red)`);
                 }
             }
 
@@ -587,13 +588,13 @@ async function syncLeads() {
                 });
                 successCount++;
             } else if (response) {
-                logToSyncDebug(`❌ Server respondió: ${response.status}`);
+                logToSyncDebug(`❌ Error definitivo Server: ${response.status}`);
                 failCount++;
             } else {
-                throw new Error("El navegador bloqueó todas las vías (CORS/HTTPS).");
+                throw new Error("El navegador bloqueó todas las salidas.");
             }
         } catch (error) {
-            logToSyncDebug(`❌ Error crítico: ${error.message}`);
+            logToSyncDebug(`❌ Error Crítico: ${error.message}`);
             failCount++;
         }
     }
