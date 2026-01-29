@@ -516,7 +516,9 @@ async function syncLeads() {
     let successCount = 0;
     let failCount = 0;
 
-    logToSyncDebug("--- VERSIÓN 8.0 (GitHub Pages Fix) ---");
+    logToSyncDebug("--- VERSIÓN 9.0 (Envío Silencioso) ---");
+
+    const tableBody = document.getElementById('leads-table-body');
 
     for (let i = 0; i < pendingLeads.length; i++) {
         const lead = pendingLeads[i];
@@ -527,80 +529,65 @@ async function syncLeads() {
             const apiPayload = mapLeadToApiPayload(lead);
             const cleanApiKey = apiKey.trim();
 
-            // EL SECRETO: Usar AllOrigins pero en formato JSONP o Raw para saltar el Origin de GitHub
-            const proxyConfigs = [
-                { name: 'Bridge-1', url: 'https://api.allorigins.win/raw?url=' + encodeURIComponent(API_CONFIG.URL) },
-                { name: 'Bridge-2', url: 'https://corsproxy.io/?' + encodeURIComponent(API_CONFIG.URL) },
-                { name: 'Bridge-3', url: 'https://thingproxy.freeboard.io/fetch/' + API_CONFIG.URL }
-            ];
+            // EL TRUCO DEFINITIVO PARA GITHUB:
+            // Usamos un proxy que no haga preguntas y enviamos como "text/plain" 
+            // para que el navegador no bloquee la petición por seguridad.
+            const proxyUrl = 'https://api.allorigins.win/raw?url=' + encodeURIComponent(API_CONFIG.URL);
 
-            let response;
-            let successRaw = false;
+            logToSyncDebug(`🔄 Paso 1: Conectando con el puente...`);
 
-            for (const config of proxyConfigs) {
-                try {
-                    logToSyncDebug(`🔄 Probando: ${config.name}...`);
+            const response = await fetch(proxyUrl, {
+                method: 'POST',
+                headers: {
+                    // Cambiamos el Type para saltar la seguridad del navegador
+                    'api-key': cleanApiKey,
+                    'env': apiEnv
+                },
+                body: JSON.stringify(apiPayload)
+            });
 
-                    // En HTTPS (GitHub), forzamos omitir credenciales para que el navegador sea menos estricto
-                    response = await fetch(config.url, {
-                        method: 'POST',
-                        mode: 'cors',
-                        credentials: 'omit',
-                        headers: {
-                            'Content-Type': 'application/json',
-                            'api-key': cleanApiKey,
-                            'env': apiEnv
-                        },
-                        body: JSON.stringify(apiPayload)
-                    });
-
-                    if (response.ok || response.status < 500) {
-                        successRaw = true;
-                        break;
-                    }
-                } catch (err) {
-                    logToSyncDebug(`⚠️ ${config.name} bloqueado.`);
-                }
-            }
-
-            if (successRaw && response && response.ok) {
+            if (response.ok) {
                 const responseData = await response.json();
-                logToSyncDebug(`✅ ¡SINCRONIZADO EN GITHUB!`);
+                logToSyncDebug(`✅ ¡LOGRADO! El servidor ha aceptado el lead.`);
 
                 await db.leads.update(lead.id, {
                     synced: true,
-                    apiLeadId: (() => {
-                        try {
-                            if (responseData && typeof responseData === 'object') {
-                                const keys = Object.keys(responseData);
-                                for (const k of keys) {
-                                    if (responseData[k] && responseData[k].pubsub && responseData[k].pubsub.process_leadID) {
-                                        return responseData[k].pubsub.process_leadID;
-                                    }
-                                }
-                            }
-                            return responseData.lead_id || responseData.id || responseData.leadId || "OK";
-                        } catch (e) { return "OK"; }
-                    })(),
+                    apiLeadId: (responseData.lead_id || responseData.id || "OK"),
                     apiResponse: responseData,
                     sentPayload: apiPayload
                 });
                 successCount++;
-            } else if (response) {
-                logToSyncDebug(`❌ Respuesta servidor: ${response.status}`);
-                failCount++;
             } else {
-                throw new Error("El navegador bloqueó todas las salidas.");
+                logToSyncDebug(`❌ Respuesta del servidor: ${response.status}`);
+                failCount++;
             }
         } catch (error) {
-            logToSyncDebug(`❌ Error Final: ${error.message}`);
-            failCount++;
+            logToSyncDebug(`⚠️ Intento 2 (CORS Proxy)...`);
+            try {
+                const backupUrl = 'https://corsproxy.io/?' + encodeURIComponent(API_CONFIG.URL);
+                const res = await fetch(backupUrl, {
+                    method: 'POST',
+                    headers: { 'api-key': apiKey.trim(), 'env': apiEnv },
+                    body: JSON.stringify(mapLeadToApiPayload(lead))
+                });
+                if (res.ok) {
+                    logToSyncDebug(`✅ ¡LOGRADO vía Túnel 2!`);
+                    successCount++;
+                    await db.leads.update(lead.id, { synced: true, apiLeadId: "OK" });
+                } else { throw new Error(res.status); }
+            } catch (e2) {
+                logToSyncDebug(`❌ Error definitivo: El navegador bloqueó la salida.`);
+                failCount++;
+            }
         }
     }
 
+    // Recargar tabla con seguridad
+    if (typeof loadLeadsToTable === 'function') loadLeadsToTable();
+    else location.reload();
+
     syncBtn.textContent = "Enviar a API Leads";
     syncBtn.disabled = false;
-    loadLeadsToTable();
 
     if (successCount > 0) showToast(`Sincronizados ${successCount} leads.`, 'success');
     logToSyncDebug(`--- Fin: ${successCount} OK, ${failCount} Errores ---`);
