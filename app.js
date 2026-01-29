@@ -516,12 +516,6 @@ async function syncLeads() {
     let successCount = 0;
     let failCount = 0;
 
-    const activeHeaders = {
-        'Content-Type': 'application/json',
-        'api-key': apiKey,
-        'env': apiEnv
-    };
-
     for (let i = 0; i < pendingLeads.length; i++) {
         const lead = pendingLeads[i];
         syncBtn.textContent = `Enviando ${i + 1}/${pendingLeads.length}...`;
@@ -531,11 +525,16 @@ async function syncLeads() {
             const apiPayload = mapLeadToApiPayload(lead);
             localStorage.setItem('last_api_payload', JSON.stringify(apiPayload, null, 2));
 
-            // Lista de proxies para probar en orden
-            // Prioridad 1: corsproxy (Ganador en pruebas)
-            // Prioridad 2: thingproxy (Respaldo)
+            const cleanApiKey = apiKey.trim();
+            const activeHeaders = {
+                'Content-Type': 'application/json',
+                'api-key': cleanApiKey,
+                'env': apiEnv
+            };
+
             const proxies = [
                 'https://corsproxy.io/?',
+                'https://api.allorigins.win/raw?url=',
                 'https://thingproxy.freeboard.io/fetch/'
             ];
 
@@ -545,13 +544,13 @@ async function syncLeads() {
 
             for (const proxyBase of proxies) {
                 try {
-                    const proxyName = proxyBase.includes('thingproxy') ? 'thingproxy' : 'corsproxy';
+                    const proxyName = proxyBase.includes('allorigins') ? 'allorigins' : (proxyBase.includes('thingproxy') ? 'thingproxy' : 'corsproxy');
                     logToSyncDebug(`🔄 Probando vía: ${proxyName}...`);
 
-                    const finalUrl = proxyBase + API_CONFIG.URL;
+                    const finalUrl = proxyBase + encodeURI(API_CONFIG.URL);
 
                     const controller = new AbortController();
-                    const timeoutId = setTimeout(() => controller.abort(), 20000); // 20 seg por proxy
+                    const timeoutId = setTimeout(() => controller.abort(), 15000);
 
                     response = await fetch(finalUrl, {
                         method: 'POST',
@@ -562,19 +561,18 @@ async function syncLeads() {
 
                     clearTimeout(timeoutId);
 
-                    // Si responde algo razonable (incluso 400 Bad Request es una respuesta "válida" de red)
                     if (response.ok || response.status < 500) {
                         successRaw = true;
                         break;
                     }
                 } catch (err) {
                     lastErrorMsg = err.message;
-                    logToSyncDebug(`⚠️ ${err.message}`);
+                    logToSyncDebug(`⚠️ ${proxyName} falló: ${err.message}`);
                 }
             }
 
             if (!successRaw || !response) {
-                throw new Error("Todos los túneles fallaron. Último error: " + lastErrorMsg);
+                throw new Error("Sin conexión con API. Revisa tu API Key y red.");
             }
 
             const statusText = response.status + ' ' + response.statusText;
@@ -587,10 +585,8 @@ async function syncLeads() {
 
                 await db.leads.update(lead.id, {
                     synced: true,
-                    // Extract ID logic (Deep Search)
                     apiLeadId: (() => {
                         try {
-                            // 1. Busqueda profunda en keys dinamicas (ej: "36": { pubsub: { ... } })
                             if (responseData && typeof responseData === 'object') {
                                 const keys = Object.keys(responseData);
                                 for (const k of keys) {
@@ -599,7 +595,6 @@ async function syncLeads() {
                                     }
                                 }
                             }
-                            // 2. Busqueda directa
                             return responseData.lead_id || responseData.id || responseData.leadId || "OK";
                         } catch (e) { return "OK"; }
                     })(),
