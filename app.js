@@ -543,9 +543,10 @@ async function syncLeads() {
             let successRaw = false;
 
             for (const proxyBase of proxies) {
+                let currentProxyName = "proxy";
                 try {
-                    const proxyName = proxyBase.includes('allorigins') ? 'allorigins' : (proxyBase.includes('thingproxy') ? 'thingproxy' : 'corsproxy');
-                    logToSyncDebug(`🔄 Probando vía: ${proxyName}...`);
+                    currentProxyName = proxyBase.includes('allorigins') ? 'allorigins' : (proxyBase.includes('thingproxy') ? 'thingproxy' : 'corsproxy');
+                    logToSyncDebug(`🔄 Probando vía: ${currentProxyName}...`);
 
                     const finalUrl = proxyBase + encodeURI(API_CONFIG.URL);
 
@@ -567,7 +568,7 @@ async function syncLeads() {
                     }
                 } catch (err) {
                     lastErrorMsg = err.message;
-                    logToSyncDebug(`⚠️ ${proxyName} falló: ${err.message}`);
+                    logToSyncDebug(`⚠️ ${currentProxyName} falló: ${err.message}`);
                 }
             }
 
