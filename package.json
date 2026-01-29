@@ -1,0 +1,15 @@
+{
+    "name": "unie-lead-capture",
+    "version": "1.0.0",
+    "description": "Aplicación PWA offline-first para captura de leads en eventos de UNIE Universidad con sincronización a API y exportación Excel.",
+    "main": "app.js",
+    "scripts": {
+        "test": "echo \"Error: no test specified\" && exit 1"
+    },
+    "engines": {
+        "node": ">=18.0.0"
+    },
+    "dependencies": {
+        "node-fetch": "^2.6.7"
+    }
+}

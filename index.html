@@ -1,0 +1,424 @@
+<!DOCTYPE html>
+<html lang="es">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>UNIE Lead Capture</title>
+    <!-- Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        /* CRITICAL FORCE OVERRIDE for Delete Button */
+        .btn-danger {
+            background-color: #ef4444 !important;
+            color: white !important;
+            border: 2px solid #ef4444 !important;
+        }
+    </style>
+    <!-- Local Styles -->
+    <link rel="stylesheet" href="style.css?v=2.1">
+    <link rel="manifest" href="manifest.json">
+    <!-- Apple Mobile Web App Support -->
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="UNIE Leads">
+    <link rel="apple-touch-icon"
+        href="https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcQnfbVqeFBJlKxUPptSd7C86mAwile-TDsXPQ&s">
+    <!-- Libraries -->
+    <script src="libs/dexie.js"></script>
+    <script src="libs/xlsx.full.min.js"></script>
+    <script>
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', () => {
+                navigator.serviceWorker.register('./sw.js')
+                    .then(reg => console.log('SW registered'))
+                    .catch(err => console.log('SW failed', err));
+            });
+        }
+    </script>
+</head>
+
+<body>
+    <div class="app-container">
+        <!-- Notification Area -->
+        <div id="notification-area" class="notification-area"></div>
+
+        <!-- Connection Status -->
+        <div class="status-bar">
+            <span id="connection-status" class="status-pill offline">Offline</span>
+            <span id="leads-count" class="status-pill info" style="display: none;">0 Leads Guardados</span>
+        </div>
+
+        <!-- Main Content -->
+        <main class="main-content">
+            <!-- Form View -->
+            <section id="form-view" class="view active">
+                <div class="card glass-card">
+                    <div class="admin-link-container">
+                        <button id="admin-access-btn" class="admin-access-btn" title="Acceso Admin">🔒</button>
+                    </div>
+                    <header class="header">
+                        <img src="assets/logo.webp" alt="UNIE Universidad" style="height: 85px; margin-bottom: 15px;">
+                        <p>Solicita información</p>
+                    </header>
+
+                    <form id="lead-form">
+                        <!-- Área de Conocimiento -->
+                        <div class="form-group">
+                            <label for="knowledge-area">Área de Conocimiento</label>
+                            <select id="knowledge-area" name="knowledgeArea" required>
+                                <option value="" disabled selected>Selecciona un área</option>
+                                <option value="Business & Tech">Business & Tech</option>
+                                <option value="Salud">Salud</option>
+                                <option value="Derecho y RRII">Derecho y Relaciones Internacionales</option>
+                                <option value="Ciencia y Tecnología">Ciencia y Tecnología</option>
+                                <option value="Marketing y Comunicación">Marketing y Comunicación</option>
+                                <option value="Educación">Educación</option>
+                            </select>
+                        </div>
+
+                        <!-- Programa -->
+                        <div class="form-group">
+                            <label for="program">¿Qué programa te interesa?</label>
+                            <select id="program" name="program" required>
+                                <option value="" disabled selected>Selecciona un programa</option>
+                                <!-- Populated via JS -->
+                            </select>
+                        </div>
+
+                        <!-- Nombre y Apellidos -->
+                        <div style="display: flex; gap: 15px;">
+                            <div class="form-group" style="flex: 1;">
+                                <label for="firstName">Nombre</label>
+                                <input type="text" id="firstName" name="firstName" required placeholder="Nombre">
+                            </div>
+                            <div class="form-group" style="flex: 1;">
+                                <label for="lastName">Apellidos</label>
+                                <input type="text" id="lastName" name="lastName" required placeholder="Apellidos">
+                            </div>
+                        </div>
+
+                        <!-- Email -->
+                        <div class="form-group">
+                            <label for="email">Correo electrónico</label>
+                            <input type="email" id="email" name="email" required placeholder="ejemplo@email.com">
+                        </div>
+
+                        <!-- Edad -->
+                        <div class="form-group">
+                            <label for="age">Edad</label>
+                            <input type="number" inputmode="numeric" pattern="[0-9]*" id="age" name="age" min="16"
+                                max="99" placeholder="Ej. 18">
+                        </div>
+
+                        <!-- País y Provincia -->
+                        <div style="display: flex; gap: 15px;">
+                            <div class="form-group" style="flex: 1;">
+                                <label for="country">País</label>
+                                <select id="country" name="country" required>
+                                    <option value="ES" data-prefix="+34" selected>España (+34)</option>
+                                    <option value="MX" data-prefix="+52">México (+52)</option>
+                                    <option value="CO" data-prefix="+57">Colombia (+57)</option>
+                                    <option value="EC" data-prefix="+593">Ecuador (+593)</option>
+                                    <option value="PE" data-prefix="+51">Perú (+51)</option>
+                                    <option value="Other" data-prefix="">Otro</option>
+                                </select>
+                            </div>
+
+                            <div class="form-group" id="province-group" style="flex: 1;">
+                                <label for="province">Provincia *</label>
+                                <!-- Select for Spain -->
+                                <select id="province" name="provinceSelect">
+                                    <option value="" disabled selected>Selecciona</option>
+                                    <option value="Madrid">Madrid</option>
+                                    <option value="Barcelona">Barcelona</option>
+                                    <option value="Valencia">Valencia</option>
+                                    <option value="Sevilla">Sevilla</option>
+                                    <option value="Zaragoza">Zaragoza</option>
+                                    <option value="Málaga">Málaga</option>
+                                    <option value="Murcia">Murcia</option>
+                                    <option value="Palma">Palma</option>
+                                    <option value="Las Palmas">Las Palmas</option>
+                                    <option value="Bilbao">Bilbao</option>
+                                    <option value="Alicante">Alicante</option>
+                                    <option value="Córdoba">Córdoba</option>
+                                    <option value="Valladolid">Valladolid</option>
+                                    <option value="Vigo">Vigo</option>
+                                    <option value="Gijón">Gijón</option>
+                                    <option value="Hospitalet">Hospitalet</option>
+                                    <option value="Vitoria">Vitoria</option>
+                                    <option value="Coruña">A Coruña</option>
+                                    <option value="Granada">Granada</option>
+                                    <option value="Elche">Elche</option>
+                                    <option value="Other">Otra</option>
+                                </select>
+                                <!-- Free Text for International -->
+                                <input type="text" id="province-text" name="provinceText"
+                                    placeholder="Escribe tu provincia" style="display: none;">
+                            </div>
+                        </div>
+
+                        <!-- Teléfono -->
+                        <div class="form-group">
+                            <label for="phone">Teléfono</label>
+                            <div style="display: flex; gap: 10px;">
+                                <input type="text" id="phone-prefix" name="phonePrefix" value="+34" readonly
+                                    style="width: 80px; background: #eee; text-align: center;">
+                                <input type="text" inputmode="numeric" pattern="[0-9]*" id="phone" name="phone" required
+                                    placeholder="600 000 000" style="flex: 1;">
+                            </div>
+                        </div>
+
+                        <!-- Nivel de Estudios -->
+                        <div class="form-group">
+                            <label for="study-level">Nivel de estudios</label>
+                            <select id="study-level" name="studyLevel" required>
+                                <option value="" disabled selected>Selecciona</option>
+                                <option value="Bachillerato">Bachillerato</option>
+                                <option value="FP">Formación Profesional</option>
+                                <option value="Grado">Grado Universitario</option>
+                                <option value="Master">Máster</option>
+                            </select>
+                        </div>
+
+                        <div class="form-group checkbox-group">
+                            <input type="checkbox" id="privacy" name="privacy" required
+                                style="margin-top: 4px; flex-shrink: 0;">
+                            <label for="privacy">
+                                UNIE UNIVERSIDAD S.L, tratará sus datos personales para contactarle e informarle del
+                                programa seleccionado de cara a las dos próximas convocatorias del mismo. Sus datos se
+                                eliminarán una vez haya facilitado dicha información y/o transcurridas las citadas
+                                convocatorias. Ud. podrá ejercer los derechos de acceso, supresión, rectificación,
+                                oposición, limitación y portabilidad, mediante carta a UNIE UNIVERSIDAD S.L - Apartado
+                                de Correos 221 de Barcelona, o remitiendo un email a <a
+                                    href="mailto:rgpd@universidadunie.com">rgpd@universidadunie.com</a>. Asimismo,
+                                cuando lo considere oportuno podrá presentar una reclamación ante la Agencia Española de
+                                protección de datos. Podrá ponerse en contacto con nuestro Delegado de Protección de
+                                Datos mediante escrito dirigido a <a href="mailto:dpo@planeta.es">dpo@planeta.es</a> o a
+                                Grupo Planeta, At.: Delegado de Protección de Datos, Avda. Diagonal 662-664, 08034
+                                Barcelona.
+                            </label>
+                        </div>
+
+                        <!-- Honeypot (Antibots) -->
+                         <div style="opacity: 0; position: absolute; top: 0; left: 0; height: 0; width: 0; z-index: -1;">
+                            <label for="website_url">Website</label>
+                            <input type="text" id="website_url" name="website_url" tabindex="-1" autocomplete="off">
+                        </div>
+
+                        <div style="text-align: center; margin-top: 30px;">
+                            <button type="submit" class="btn btn-primary" style="min-width: 200px;">Enviar
+                                Datos</button>
+                        </div>
+                    </form>
+                </div>
+            </section>
+
+            <!-- Admin View -->
+            <section id="admin-view" class="view">
+                <div class="card glass-card wide">
+                    <header class="header row">
+                        <div style="display:flex; align-items:center; gap:10px;">
+                            <button id="exit-admin-btn" class="btn" style="width:auto; padding:5px 10px;">←</button>
+                            <div>
+                                <h2>Panel de Administración</h2>
+                                <div style="display: flex; gap: 10px; margin-top: 5px;">
+                                    <span id="admin-total-leads" class="status-pill info"
+                                        style="font-size: 0.75rem;">Guardados: 0</span>
+                                    <span id="admin-synced-leads" class="status-pill online"
+                                        style="font-size: 0.75rem;">Enviados: 0</span>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="actions">
+                            <button id="config-btn" class="btn btn-secondary">CONFIGURAR</button>
+                            <button id="export-btn" class="btn btn-secondary">EXPORTAR EXCEL</button>
+                            <button id="sync-btn" class="btn btn-primary">ENVIAR A API LEADS</button>
+                            <button id="debug-api-btn" class="btn btn-secondary" style="display: none;">VER RESPUESTA
+                                API</button>
+                            <button id="delete-all-btn" class="btn btn-danger"
+                                style="background-color: #ef4444 !important; color: white !important; border-color: #ef4444 !important; text-decoration: none !important;">BORRAR
+                                TODO</button>
+                        </div>
+                    </header>
+
+                    <div class="table-container">
+                        <table id="leads-table">
+                            <thead>
+                                <tr>
+                                    <th>ID</th>
+                                    <th>Nombre</th>
+                                    <th>Email</th>
+                                    <th>Programa</th>
+                                    <th>Fecha</th>
+                                    <th>ID API</th>
+                                    <th>Estado</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <!-- Leads inserted here -->
+                            </tbody>
+                        </table>
+                    </div>
+
+                    <!-- Debug Logs Area -->
+                    <div
+                        style="margin-top: 30px; border: 2px solid #ef4444; padding: 15px; border-radius: 8px; background: rgba(239, 68, 68, 0.05);">
+                        <h4 style="font-size: 0.9rem; color: #ef4444; margin: 0 0 10px 0; font-weight: bold;">⚠️
+                            REGISTRO TÉCNICO DE ENVÍO (LOG)</h4>
+                        <p style="font-size: 0.75rem; color: #64748b; margin-bottom: 10px;">Si el envío falla, copia el
+                            texto de aquí abajo y pégalo en el chat:</p>
+                        <textarea id="sync-debug-log" readonly
+                            style="width: 100%; height: 150px; background: #000000; color: #10b981; font-family: monospace; font-size: 0.75rem; padding: 12px; border-radius: 4px; border: 1px solid #333; display: block;"></textarea>
+                        <button onclick="document.getElementById('sync-debug-log').value=''" class="btn-tiny"
+                            style="margin-top: 5px; background: #64748b;">Limpiar Log</button>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Config View -->
+            <section id="config-view" class="view">
+                <div class="card glass-card wide">
+                    <header class="header row">
+                        <h2>Configuración de Programas</h2>
+                        <button id="back-admin-btn" class="btn btn-secondary">Volver</button>
+                    </header>
+
+                    <div class="form-group"
+                        style="padding-bottom: 20px; border-bottom: 1px solid #eee; margin-bottom: 20px;">
+                        <h3>Configuración General</h3>
+
+                        <label>API Key (Planeta Formación)</label>
+                        <div style="display: flex; gap: 10px; margin-bottom: 15px;">
+                            <input type="password" id="config-api-key" placeholder="Pegar API Key aquí">
+                            <button id="save-api-key-btn" class="btn btn-primary" style="width: auto;">Guardar</button>
+                        </div>
+
+                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px;">
+                            <div>
+                                <label>Institución (Institution)</label>
+                                <input type="text" id="config-institution" placeholder="Ej. UNIE">
+                            </div>
+                            <div>
+                                <label>Campus</label>
+                                <input type="text" id="config-campus" placeholder="Ej. Madrid">
+                            </div>
+                            <div>
+                                <label>Entorno (API)</label>
+                                <select id="config-env" class="form-control">
+                                    <option value="pre">PRE (Pruebas)</option>
+                                    <option value="prod">PROD (Producción)</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label>ID Marca</label>
+                                <input type="text" id="config-brand-id" placeholder="unie">
+                            </div>
+                            <div>
+                                <label>ID Origen (process_origin)</label>
+                                <input type="text" id="config-origin" placeholder="4">
+                            </div>
+                            <div>
+                                <label>ID Modalidad (Impartición)</label>
+                                <input type="text" id="config-impartation" placeholder="1">
+                            </div>
+                            <div>
+                                <label>ID Horario (Timing)</label>
+                                <input type="text" id="config-timing" placeholder="1">
+                            </div>
+                            <div>
+                                <label>Sexo por defecto</label>
+                                <select id="config-sex" class="form-control">
+                                    <option value="Man">Man (Hombre)</option>
+                                    <option value="Woman">Woman (Mujer)</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label>CP por defecto (si España)</label>
+                                <input type="text" id="config-postcode" placeholder="28000">
+                            </div>
+                            <div style="grid-column: span 2;">
+                                <label>Campaña Origen (Source Campaign)</label>
+                                <input type="text" id="config-campaign" placeholder="Ej. I10005M0007">
+                            </div>
+                        </div>
+                        <button id="save-general-config-btn" class="btn btn-primary" style="margin-top: 10px;">Guardar
+                            Configuración General</button>
+                    </div>
+
+                    <div class="form-group">
+                        <h3>Añadir / Editar Programa</h3>
+                        <form id="config-form"
+                            style="display: flex; gap: 10px; flex-wrap: wrap; align-items: flex-end;">
+                            <div style="flex: 2; min-width: 200px;">
+                                <label>Nombre del Programa</label>
+                                <input type="text" name="name" id="config-name" placeholder="Ej. Grado en ADE" required>
+                            </div>
+                            <div style="flex: 1; min-width: 100px;">
+                                <label>ID Producto</label>
+                                <input type="text" name="id" id="config-id" placeholder="Ej. 9017" required>
+                            </div>
+                            <div style="flex: 1; min-width: 100px;">
+                                <label>ID Dedicación</label>
+                                <input type="text" name="dedication" id="config-dedication" placeholder="Ej. 1"
+                                    required>
+                            </div>
+                            <button type="submit" class="btn btn-primary" style="width: auto;">Guardar</button>
+                        </form>
+                    </div>
+
+                    <div class="table-container">
+                        <table id="programs-table">
+                            <thead>
+                                <tr>
+                                    <th>Nombre</th>
+                                    <th>ID Producto</th>
+                                    <th>ID Dedicación</th>
+                                    <th>Acciones</th>
+                                </tr>
+                            </thead>
+                            <tbody id="programs-table-body">
+                                <!-- Programs inserted here -->
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </section>
+    </div>
+    </section>
+    </main>
+
+    <!-- Navigation Removed -->
+    </div>
+
+    <script src="app.js?v=2.2"></script>
+    <!-- Debug Modal -->
+    <div id="debug-modal" class="modal-overlay hidden">
+        <div class="modal-content">
+            <header class="modal-header">
+                <h3>Detalle Técnico del Lead</h3>
+                <button id="close-debug-modal" class="btn-icon">×</button>
+            </header>
+            <div class="modal-body">
+                <div class="debug-section">
+                    <div class="section-header">
+                        <h4>DATOS ENVIADOS</h4>
+                        <button onclick="copyToClipboard('sent-payload-pre')" class="btn-tiny">Copiar</button>
+                    </div>
+                    <pre id="sent-payload-pre"></pre>
+                </div>
+                <div class="debug-section">
+                    <div class="section-header">
+                        <h4>RESPUESTA DEL SERVIDOR</h4>
+                        <button onclick="copyToClipboard('api-response-pre')" class="btn-tiny">Copiar</button>
+                    </div>
+                    <pre id="api-response-pre"></pre>
+                </div>
+            </div>
+        </div>
+    </div>
+</body>
+
+</html>
