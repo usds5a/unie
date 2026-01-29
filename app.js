@@ -516,7 +516,11 @@ async function syncLeads() {
     let successCount = 0;
     let failCount = 0;
 
-    logToSyncDebug("--- VERSIÓN 11.0 (Restricción de Red Fix) ---");
+    const activeHeaders = {
+        'Content-Type': 'application/json',
+        'api-key': apiKey,
+        'env': apiEnv
+    };
 
     for (let i = 0; i < pendingLeads.length; i++) {
         const lead = pendingLeads[i];
@@ -525,51 +529,98 @@ async function syncLeads() {
 
         try {
             const apiPayload = mapLeadToApiPayload(lead);
-            const cleanApiKey = apiKey.trim();
+            localStorage.setItem('last_api_payload', JSON.stringify(apiPayload, null, 2));
 
-            // EL PUENTE DEFINITIVO:
-            // Usamos un proxy que convierte peticiones CORS y HTTPS en tráfico seguro
-            const apiTarget = API_CONFIG.URL;
-            const finalRequestUrl = 'https://corsproxy.io/?' + encodeURIComponent(apiTarget);
+            // Lista de proxies para probar en orden
+            // Prioridad 1: corsproxy (Ganador en pruebas)
+            // Prioridad 2: thingproxy (Respaldo)
+            const proxies = [
+                'https://corsproxy.io/?',
+                'https://thingproxy.freeboard.io/fetch/'
+            ];
 
-            logToSyncDebug(`🔄 Probando vía Puente Seguro...`);
+            let response;
+            let lastErrorMsg = "";
+            let successRaw = false;
 
-            const response = await fetch(finalRequestUrl, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'api-key': cleanApiKey,
-                    'env': apiEnv
-                },
-                body: JSON.stringify(apiPayload)
-            });
+            for (const proxyBase of proxies) {
+                try {
+                    const proxyName = proxyBase.includes('thingproxy') ? 'thingproxy' : 'corsproxy';
+                    logToSyncDebug(`🔄 Probando vía: ${proxyName}...`);
+
+                    const finalUrl = proxyBase + API_CONFIG.URL;
+
+                    const controller = new AbortController();
+                    const timeoutId = setTimeout(() => controller.abort(), 20000); // 20 seg por proxy
+
+                    response = await fetch(finalUrl, {
+                        method: 'POST',
+                        headers: activeHeaders,
+                        body: JSON.stringify(apiPayload),
+                        signal: controller.signal
+                    });
+
+                    clearTimeout(timeoutId);
+
+                    // Si responde algo razonable (incluso 400 Bad Request es una respuesta "válida" de red)
+                    if (response.ok || response.status < 500) {
+                        successRaw = true;
+                        break;
+                    }
+                } catch (err) {
+                    lastErrorMsg = err.message;
+                    logToSyncDebug(`⚠️ ${err.message}`);
+                }
+            }
+
+            if (!successRaw || !response) {
+                throw new Error("Todos los túneles fallaron. Último error: " + lastErrorMsg);
+            }
+
+            const statusText = response.status + ' ' + response.statusText;
+            logToSyncDebug(`📡 Status Server: ${statusText}`);
 
             if (response.ok) {
                 const responseData = await response.json();
-                logToSyncDebug(`✅ ¡LOGRADO! El servidor ha aceptado los datos.`);
+                logToSyncDebug(`✅ Respuesta Recibida.`);
+                localStorage.setItem('last_api_response', JSON.stringify(responseData, null, 2));
 
                 await db.leads.update(lead.id, {
                     synced: true,
-                    apiLeadId: (responseData.lead_id || responseData.id || "OK"),
+                    // Extract ID logic (Deep Search)
+                    apiLeadId: (() => {
+                        try {
+                            // 1. Busqueda profunda en keys dinamicas (ej: "36": { pubsub: { ... } })
+                            if (responseData && typeof responseData === 'object') {
+                                const keys = Object.keys(responseData);
+                                for (const k of keys) {
+                                    if (responseData[k] && responseData[k].pubsub && responseData[k].pubsub.process_leadID) {
+                                        return responseData[k].pubsub.process_leadID;
+                                    }
+                                }
+                            }
+                            // 2. Busqueda directa
+                            return responseData.lead_id || responseData.id || responseData.leadId || "OK";
+                        } catch (e) { return "OK"; }
+                    })(),
                     apiResponse: responseData,
                     sentPayload: apiPayload
                 });
                 successCount++;
             } else {
-                logToSyncDebug(`❌ Respuesta del servidor: ${response.status}`);
+                const errorText = await response.text();
+                logToSyncDebug(`❌ Error Server: ${errorText.substring(0, 50)}`);
                 failCount++;
             }
         } catch (error) {
-            logToSyncDebug(`❌ Error de Red / Bloqueo: ${error.message}`);
+            logToSyncDebug(`❌ Error: ${error.message}`);
             failCount++;
         }
     }
 
-    if (typeof loadLeadsToTable === 'function') loadLeadsToTable();
-    else location.reload();
-
     syncBtn.textContent = "Enviar a API Leads";
     syncBtn.disabled = false;
+    loadLeadsToTable();
 
     if (successCount > 0) showToast(`Sincronizados ${successCount} leads.`, 'success');
     logToSyncDebug(`--- Fin: ${successCount} OK, ${failCount} Errores ---`);
