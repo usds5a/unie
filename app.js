@@ -481,7 +481,7 @@ function logToSyncDebug(msg) {
 }
 
 async function syncLeads() {
-    logToSyncDebug("--- Iniciando Sincronización ---");
+    logToSyncDebug("--- Iniciando Sincronización (v12.0) ---");
 
     if (!isOnline) {
         alert("Error: No hay conexión a internet.");
@@ -489,14 +489,8 @@ async function syncLeads() {
         return;
     }
 
-    let pendingLeads = [];
-    try {
-        const allLeads = await db.leads.toArray();
-        pendingLeads = allLeads.filter(l => l.synced === false);
-    } catch (e) {
-        alert("Error base de datos: " + e.message);
-        return;
-    }
+    const allLeads = await db.leads.toArray();
+    const pendingLeads = allLeads.filter(l => l.synced === false);
 
     if (pendingLeads.length === 0) {
         alert("ℹ️ NO HAY LEADS PENDIENTES.");
@@ -518,7 +512,7 @@ async function syncLeads() {
 
     const activeHeaders = {
         'Content-Type': 'application/json',
-        'api-key': apiKey,
+        'api-key': apiKey.trim(),
         'env': apiEnv
     };
 
@@ -529,68 +523,54 @@ async function syncLeads() {
 
         try {
             const apiPayload = mapLeadToApiPayload(lead);
-            localStorage.setItem('last_api_payload', JSON.stringify(apiPayload, null, 2));
+            const bodyStr = JSON.stringify(apiPayload);
 
-            // Lista de proxies para probar en orden
-            // Prioridad 1: corsproxy (Ganador en pruebas)
-            // Prioridad 2: thingproxy (Respaldo)
-            const proxies = [
-                'https://corsproxy.io/?',
-                'https://thingproxy.freeboard.io/fetch/'
+            // Estrategia Multi-Túnel Optimizada para GitHub Pages (HTTPS/CORS)
+            const proxyAttempts = [
+                { name: "Directo", url: API_CONFIG.URL },
+                { name: "CORS-Proxy", url: "https://corsproxy.io/?" + encodeURIComponent(API_CONFIG.URL) },
+                { name: "AllOrigins", url: "https://api.allorigins.win/raw?url=" + encodeURIComponent(API_CONFIG.URL) },
+                { name: "ThingProxy", url: "https://thingproxy.freeboard.io/fetch/" + API_CONFIG.URL }
             ];
 
             let response;
-            let lastErrorMsg = "";
             let successRaw = false;
 
-            for (const proxyBase of proxies) {
+            for (const proxy of proxyAttempts) {
                 try {
-                    const proxyName = proxyBase.includes('thingproxy') ? 'thingproxy' : 'corsproxy';
-                    logToSyncDebug(`🔄 Probando vía: ${proxyName}...`);
-
-                    const finalUrl = proxyBase + API_CONFIG.URL;
+                    logToSyncDebug(`🔄 Probando: ${proxy.name}...`);
 
                     const controller = new AbortController();
-                    const timeoutId = setTimeout(() => controller.abort(), 20000); // 20 seg por proxy
+                    const timeoutId = setTimeout(() => controller.abort(), 15000);
 
-                    response = await fetch(finalUrl, {
+                    response = await fetch(proxy.url, {
                         method: 'POST',
+                        mode: 'cors',
+                        credentials: 'omit',
                         headers: activeHeaders,
-                        body: JSON.stringify(apiPayload),
+                        body: bodyStr,
                         signal: controller.signal
                     });
 
                     clearTimeout(timeoutId);
 
-                    // Si responde algo razonable (incluso 400 Bad Request es una respuesta "válida" de red)
                     if (response.ok || response.status < 500) {
                         successRaw = true;
                         break;
                     }
-                } catch (err) {
-                    lastErrorMsg = err.message;
-                    logToSyncDebug(`⚠️ ${err.message}`);
+                } catch (e) {
+                    logToSyncDebug(`⚠️ ${proxy.name} falló.`);
                 }
             }
 
-            if (!successRaw || !response) {
-                throw new Error("Todos los túneles fallaron. Último error: " + lastErrorMsg);
-            }
-
-            const statusText = response.status + ' ' + response.statusText;
-            logToSyncDebug(`📡 Status Server: ${statusText}`);
-
-            if (response.ok) {
+            if (successRaw && response && response.ok) {
                 const responseData = await response.json();
-                logToSyncDebug(`✅ Respuesta Recibida.`);
-                localStorage.setItem('last_api_response', JSON.stringify(responseData, null, 2));
+                logToSyncDebug(`✅ Sincronizado correctamente.`);
 
                 await db.leads.update(lead.id, {
                     synced: true,
-                    // Extract ID logic (Deep Search)
                     apiLeadId: (() => {
                         try {
-                            // 1. Busqueda profunda en keys dinamicas (ej: "36": { pubsub: { ... } })
                             if (responseData && typeof responseData === 'object') {
                                 const keys = Object.keys(responseData);
                                 for (const k of keys) {
@@ -599,7 +579,6 @@ async function syncLeads() {
                                     }
                                 }
                             }
-                            // 2. Busqueda directa
                             return responseData.lead_id || responseData.id || responseData.leadId || "OK";
                         } catch (e) { return "OK"; }
                     })(),
@@ -607,13 +586,14 @@ async function syncLeads() {
                     sentPayload: apiPayload
                 });
                 successCount++;
-            } else {
-                const errorText = await response.text();
-                logToSyncDebug(`❌ Error Server: ${errorText.substring(0, 50)}`);
+            } else if (response) {
+                logToSyncDebug(`❌ Server respondió: ${response.status}`);
                 failCount++;
+            } else {
+                throw new Error("El navegador bloqueó todas las vías (CORS/HTTPS).");
             }
         } catch (error) {
-            logToSyncDebug(`❌ Error: ${error.message}`);
+            logToSyncDebug(`❌ Error crítico: ${error.message}`);
             failCount++;
         }
     }
