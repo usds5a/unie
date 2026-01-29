@@ -31,8 +31,8 @@ Para una experiencia óptima en **iPad o iPhone**:
 ## ⚙️ Panel de Administración y Configuración
 
 Accede mediante el icono del candado (🔒) en la pantalla principal:
--   **Contraseña Admin**:
--   **Contraseña de Borrado Crítico**: 
+-   **Contraseña Admin**: `unie321`
+-   **Contraseña de Borrado Crítico**: `borradomax`
 
 ### Funciones disponibles:
 -   **Sincronización Inteligente**: Envía los leads acumulados a la API de Planeta mediante túneles seguros que evitan bloqueos de red.
@@ -42,4 +42,3 @@ Accede mediante el icono del candado (🔒) en la pantalla principal:
 
 ---
 *Desarrollado para UNIE Universidad - Eficiencia y Seguridad en Captación de Leads.*
-
