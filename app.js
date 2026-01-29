@@ -525,8 +525,8 @@ async function syncLeads() {
             const apiPayload = mapLeadToApiPayload(lead);
             const cleanApiKey = apiKey.trim();
 
-            // Configuramos los proxies
             const proxies = [
+                'https://api.codetabs.com/v1/proxy?quest=',
                 'https://corsproxy.io/?',
                 'https://api.allorigins.win/raw?url=',
                 'https://thingproxy.freeboard.io/fetch/'
@@ -534,60 +534,56 @@ async function syncLeads() {
 
             let response;
             let successRaw = false;
+            let finalError = "No se pudo conectar";
+
+            // Intentamos pasar las keys también por URL por si el proxy/server lo acepta
+            const urlWithParams = `${API_CONFIG.URL}?api-key=${cleanApiKey}&env=${apiEnv}`;
 
             for (const proxyBase of proxies) {
                 try {
                     const proxyName = proxyBase.split('/')[2];
-                    logToSyncDebug(`🔄 Intentando vía: ${proxyName}...`);
-
-                    const finalUrl = proxyBase + encodeURI(API_CONFIG.URL);
+                    const finalUrl = proxyBase + encodeURIComponent(urlWithParams);
+                    logToSyncDebug(`🔄 Probando vía: ${proxyName}...`);
 
                     response = await fetch(finalUrl, {
                         method: 'POST',
+                        // Usamos text/plain para evitar el bloqueo CORS pre-petición (Preflight)
                         headers: {
-                            'Content-Type': 'application/json',
+                            'Content-Type': 'text/plain',
                             'api-key': cleanApiKey,
                             'env': apiEnv
                         },
                         body: JSON.stringify(apiPayload)
                     });
 
-                    if (response.ok || response.status === 400) { // 400 es que llegó al server
+                    if (response.ok || response.status < 500) {
                         successRaw = true;
                         break;
                     }
                 } catch (err) {
-                    logToSyncDebug(`⚠️ ${proxyBase.split('/')[2]} no disponible.`);
+                    logToSyncDebug(`⚠️ ${proxyBase.split('/')[2]} falló.`);
+                    finalError = err.message;
                 }
             }
 
-            // Si fallan los proxies, intentamos DIRECTO (CORS Relaxed)
             if (!successRaw) {
-                logToSyncDebug(`🔄 Intentando vía: DIRECTO (Final)...`);
+                logToSyncDebug(`🔄 Intento Directo Final...`);
                 try {
-                    response = await fetch(API_CONFIG.URL, {
+                    response = await fetch(urlWithParams, {
                         method: 'POST',
-                        mode: 'cors',
-                        headers: {
-                            'Content-Type': 'application/json',
-                            'api-key': cleanApiKey,
-                            'env': apiEnv
-                        },
+                        headers: { 'Content-Type': 'text/plain', 'api-key': cleanApiKey, 'env': apiEnv },
                         body: JSON.stringify(apiPayload)
                     });
                     if (response.ok || response.status < 500) successRaw = true;
                 } catch (e) {
-                    logToSyncDebug(`❌ Error definitivo de red.`);
+                    logToSyncDebug(`❌ Error definitivo.`);
+                    finalError = e.message;
                 }
             }
 
-            if (!successRaw || !response) {
-                throw new Error("No se pudo alcanzar el servidor de la API.");
-            }
-
-            if (response.ok) {
+            if (successRaw && response && response.ok) {
                 const responseData = await response.json();
-                logToSyncDebug(`✅ ¡SINCRONIZADO CON ÉXITO!`);
+                logToSyncDebug(`✅ ¡LOGRADO! Lead enviado.`);
                 localStorage.setItem('last_api_response', JSON.stringify(responseData, null, 2));
 
                 await db.leads.update(lead.id, {
@@ -609,13 +605,15 @@ async function syncLeads() {
                     sentPayload: apiPayload
                 });
                 successCount++;
-            } else {
+            } else if (response) {
                 const errorText = await response.text();
-                logToSyncDebug(`❌ El servidor respondió error: ${response.status}`);
+                logToSyncDebug(`❌ Error ${response.status}: ${errorText.substring(0, 40)}`);
                 failCount++;
+            } else {
+                throw new Error(finalError);
             }
         } catch (error) {
-            logToSyncDebug(`❌ Error: ${error.message}`);
+            logToSyncDebug(`❌ Error Final: ${error.message}`);
             failCount++;
         }
     }
