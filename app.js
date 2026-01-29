@@ -516,7 +516,7 @@ async function syncLeads() {
     let successCount = 0;
     let failCount = 0;
 
-    logToSyncDebug("--- VERSIÓN 6.0 (Diagnóstico Maestro) ---");
+    logToSyncDebug("--- VERSIÓN 8.0 (GitHub Pages Fix) ---");
 
     for (let i = 0; i < pendingLeads.length; i++) {
         const lead = pendingLeads[i];
@@ -527,60 +527,45 @@ async function syncLeads() {
             const apiPayload = mapLeadToApiPayload(lead);
             const cleanApiKey = apiKey.trim();
 
-            // Configuración individual para cada proxy
+            // EL SECRETO: Usar AllOrigins pero en formato JSONP o Raw para saltar el Origin de GitHub
             const proxyConfigs = [
-                { name: 'CORS-Proxy (Directo)', url: 'https://corsproxy.io/?' + API_CONFIG.URL },
-                { name: 'AllOrigins (Encoded)', url: 'https://api.allorigins.win/raw?url=' + encodeURIComponent(API_CONFIG.URL) },
-                { name: 'ThingProxy (Raw)', url: 'https://thingproxy.freeboard.io/fetch/' + API_CONFIG.URL }
+                { name: 'Bridge-1', url: 'https://api.allorigins.win/raw?url=' + encodeURIComponent(API_CONFIG.URL) },
+                { name: 'Bridge-2', url: 'https://corsproxy.io/?' + encodeURIComponent(API_CONFIG.URL) },
+                { name: 'Bridge-3', url: 'https://thingproxy.freeboard.io/fetch/' + API_CONFIG.URL }
             ];
 
             let response;
             let successRaw = false;
 
-            // 1. INTENTO DIRECTO
-            try {
-                logToSyncDebug(`🔄 Probando: DIRECTO...`);
-                response = await fetch(API_CONFIG.URL, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json', 'api-key': cleanApiKey, 'env': apiEnv },
-                    body: JSON.stringify(apiPayload)
-                });
-                if (response.ok || response.status < 500) successRaw = true;
-            } catch (e) {
-                logToSyncDebug(`⚠️ Directo bloqueado por el navegador (CORS).`);
-            }
+            for (const config of proxyConfigs) {
+                try {
+                    logToSyncDebug(`🔄 Probando: ${config.name}...`);
 
-            // 2. INTENTO POR TÚNELES
-            if (!successRaw) {
-                for (const config of proxyConfigs) {
-                    try {
-                        logToSyncDebug(`🔄 Probando: ${config.name}...`);
-                        response = await fetch(config.url, {
-                            method: 'POST',
-                            headers: {
-                                'Content-Type': 'application/json',
-                                'api-key': cleanApiKey,
-                                'env': apiEnv
-                            },
-                            body: JSON.stringify(apiPayload)
-                        });
+                    // En HTTPS (GitHub), forzamos omitir credenciales para que el navegador sea menos estricto
+                    response = await fetch(config.url, {
+                        method: 'POST',
+                        mode: 'cors',
+                        credentials: 'omit',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'api-key': cleanApiKey,
+                            'env': apiEnv
+                        },
+                        body: JSON.stringify(apiPayload)
+                    });
 
-                        if (response.ok || response.status < 500) {
-                            successRaw = true;
-                            break;
-                        } else {
-                            logToSyncDebug(`❌ Server respondió: ${response.status}`);
-                        }
-                    } catch (err) {
-                        logToSyncDebug(`❌ Error en ${config.name}: ${err.message}`);
+                    if (response.ok || response.status < 500) {
+                        successRaw = true;
+                        break;
                     }
+                } catch (err) {
+                    logToSyncDebug(`⚠️ ${config.name} bloqueado.`);
                 }
             }
 
             if (successRaw && response && response.ok) {
                 const responseData = await response.json();
-                logToSyncDebug(`✅ ¡LOGRADO! Lead sincronizado.`);
-                localStorage.setItem('last_api_response', JSON.stringify(responseData, null, 2));
+                logToSyncDebug(`✅ ¡SINCRONIZADO EN GITHUB!`);
 
                 await db.leads.update(lead.id, {
                     synced: true,
@@ -602,13 +587,13 @@ async function syncLeads() {
                 });
                 successCount++;
             } else if (response) {
-                logToSyncDebug(`❌ Error final del server: ${response.status}`);
+                logToSyncDebug(`❌ Respuesta servidor: ${response.status}`);
                 failCount++;
             } else {
-                throw new Error("Ninguna vía de conexión funcionó.");
+                throw new Error("El navegador bloqueó todas las salidas.");
             }
         } catch (error) {
-            logToSyncDebug(`❌ RESULTADO: ${error.message}`);
+            logToSyncDebug(`❌ Error Final: ${error.message}`);
             failCount++;
         }
     }
