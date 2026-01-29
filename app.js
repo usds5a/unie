@@ -516,9 +516,7 @@ async function syncLeads() {
     let successCount = 0;
     let failCount = 0;
 
-    logToSyncDebug("--- VERSIÓN 9.0 (Envío Silencioso) ---");
-
-    const tableBody = document.getElementById('leads-table-body');
+    logToSyncDebug("--- VERSIÓN 10.0 (Restaurada & Activa) ---");
 
     for (let i = 0; i < pendingLeads.length; i++) {
         const lead = pendingLeads[i];
@@ -529,17 +527,17 @@ async function syncLeads() {
             const apiPayload = mapLeadToApiPayload(lead);
             const cleanApiKey = apiKey.trim();
 
-            // EL TRUCO DEFINITIVO PARA GITHUB:
-            // Usamos un proxy que no haga preguntas y enviamos como "text/plain" 
-            // para que el navegador no bloquee la petición por seguridad.
-            const proxyUrl = 'https://api.allorigins.win/raw?url=' + encodeURIComponent(API_CONFIG.URL);
+            // Usamos un proxy que convierte CORS en peticiones normales
+            // Este es el método más fiable para GitHub Pages
+            const targetUrl = API_CONFIG.URL;
+            const bridgeUrl = 'https://corsproxy.io/?' + encodeURIComponent(targetUrl);
 
-            logToSyncDebug(`🔄 Paso 1: Conectando con el puente...`);
+            logToSyncDebug(`🔄 Intentando conexión segura...`);
 
-            const response = await fetch(proxyUrl, {
+            const response = await fetch(bridgeUrl, {
                 method: 'POST',
                 headers: {
-                    // Cambiamos el Type para saltar la seguridad del navegador
+                    'Content-Type': 'application/json',
                     'api-key': cleanApiKey,
                     'env': apiEnv
                 },
@@ -548,41 +546,24 @@ async function syncLeads() {
 
             if (response.ok) {
                 const responseData = await response.json();
-                logToSyncDebug(`✅ ¡LOGRADO! El servidor ha aceptado el lead.`);
-
+                logToSyncDebug(`✅ ¡SINCRONIZADO CON ÉXITO!`);
                 await db.leads.update(lead.id, {
                     synced: true,
-                    apiLeadId: (responseData.lead_id || responseData.id || "OK"),
+                    apiLeadId: (responseData.lead_id || "OK"),
                     apiResponse: responseData,
                     sentPayload: apiPayload
                 });
                 successCount++;
             } else {
-                logToSyncDebug(`❌ Respuesta del servidor: ${response.status}`);
+                logToSyncDebug(`❌ Error del servidor: ${response.status}`);
                 failCount++;
             }
         } catch (error) {
-            logToSyncDebug(`⚠️ Intento 2 (CORS Proxy)...`);
-            try {
-                const backupUrl = 'https://corsproxy.io/?' + encodeURIComponent(API_CONFIG.URL);
-                const res = await fetch(backupUrl, {
-                    method: 'POST',
-                    headers: { 'api-key': apiKey.trim(), 'env': apiEnv },
-                    body: JSON.stringify(mapLeadToApiPayload(lead))
-                });
-                if (res.ok) {
-                    logToSyncDebug(`✅ ¡LOGRADO vía Túnel 2!`);
-                    successCount++;
-                    await db.leads.update(lead.id, { synced: true, apiLeadId: "OK" });
-                } else { throw new Error(res.status); }
-            } catch (e2) {
-                logToSyncDebug(`❌ Error definitivo: El navegador bloqueó la salida.`);
-                failCount++;
-            }
+            logToSyncDebug(`❌ Error de red: ${error.message}`);
+            failCount++;
         }
     }
 
-    // Recargar tabla con seguridad
     if (typeof loadLeadsToTable === 'function') loadLeadsToTable();
     else location.reload();
 
