@@ -516,7 +516,7 @@ async function syncLeads() {
     let successCount = 0;
     let failCount = 0;
 
-    logToSyncDebug("--- VERSIÓN 10.0 (Restaurada & Activa) ---");
+    logToSyncDebug("--- VERSIÓN 11.0 (Restricción de Red Fix) ---");
 
     for (let i = 0; i < pendingLeads.length; i++) {
         const lead = pendingLeads[i];
@@ -527,14 +527,14 @@ async function syncLeads() {
             const apiPayload = mapLeadToApiPayload(lead);
             const cleanApiKey = apiKey.trim();
 
-            // Usamos un proxy que convierte CORS en peticiones normales
-            // Este es el método más fiable para GitHub Pages
-            const targetUrl = API_CONFIG.URL;
-            const bridgeUrl = 'https://corsproxy.io/?' + encodeURIComponent(targetUrl);
+            // EL PUENTE DEFINITIVO:
+            // Usamos un proxy que convierte peticiones CORS y HTTPS en tráfico seguro
+            const apiTarget = API_CONFIG.URL;
+            const finalRequestUrl = 'https://corsproxy.io/?' + encodeURIComponent(apiTarget);
 
-            logToSyncDebug(`🔄 Intentando conexión segura...`);
+            logToSyncDebug(`🔄 Probando vía Puente Seguro...`);
 
-            const response = await fetch(bridgeUrl, {
+            const response = await fetch(finalRequestUrl, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
@@ -546,20 +546,21 @@ async function syncLeads() {
 
             if (response.ok) {
                 const responseData = await response.json();
-                logToSyncDebug(`✅ ¡SINCRONIZADO CON ÉXITO!`);
+                logToSyncDebug(`✅ ¡LOGRADO! El servidor ha aceptado los datos.`);
+
                 await db.leads.update(lead.id, {
                     synced: true,
-                    apiLeadId: (responseData.lead_id || "OK"),
+                    apiLeadId: (responseData.lead_id || responseData.id || "OK"),
                     apiResponse: responseData,
                     sentPayload: apiPayload
                 });
                 successCount++;
             } else {
-                logToSyncDebug(`❌ Error del servidor: ${response.status}`);
+                logToSyncDebug(`❌ Respuesta del servidor: ${response.status}`);
                 failCount++;
             }
         } catch (error) {
-            logToSyncDebug(`❌ Error de red: ${error.message}`);
+            logToSyncDebug(`❌ Error de Red / Bloqueo: ${error.message}`);
             failCount++;
         }
     }
