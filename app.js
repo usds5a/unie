@@ -334,13 +334,6 @@ async function handleFormSubmit(e) {
         window.formLoadTime = new Date().getTime(); // Reset timer
         showToast('Lead guardado correctamente', 'success');
         updateLeadsCount(); // Update counters immediately
-
-        // --- AUTOMATIC SYNC ---
-        // If we are online, trigger a silent sync immediately
-        if (isOnline) {
-            console.log("Auto-syncing lead...");
-            syncLeads(true); // Call sync function in silent mode
-        }
     } catch (error) {
         console.error('Failed to save lead:', error);
         showToast('Error al guardar el lead', 'error');
@@ -487,20 +480,26 @@ function logToSyncDebug(msg) {
     }
 }
 
-async function syncLeads(isSilent = false) {
-    if (!isSilent) logToSyncDebug("--- Sincronización (Modo Vercel) ---");
+async function syncLeads() {
+    logToSyncDebug("--- Iniciando Sincronización ---");
 
     if (!isOnline) {
-        if (!isSilent) alert("Error: No hay conexión a internet.");
+        alert("Error: No hay conexión a internet.");
         logToSyncDebug("❌ Error: Sin conexión.");
         return;
     }
 
-    const allLeads = await db.leads.toArray();
-    const pendingLeads = allLeads.filter(l => l.synced === false);
+    let pendingLeads = [];
+    try {
+        const allLeads = await db.leads.toArray();
+        pendingLeads = allLeads.filter(l => l.synced === false);
+    } catch (e) {
+        alert("Error base de datos: " + e.message);
+        return;
+    }
 
     if (pendingLeads.length === 0) {
-        if (!isSilent) alert("ℹ️ NO HAY LEADS PENDIENTES.");
+        alert("ℹ️ NO HAY LEADS PENDIENTES.");
         return;
     }
 
@@ -508,7 +507,7 @@ async function syncLeads(isSilent = false) {
     const apiEnv = localStorage.getItem('config_env') || 'pre';
 
     if (!apiKey) {
-        if (!isSilent) alert("⚠️ Falta API Key en Configuración.");
+        alert("⚠️ Falta API Key en Configuración.");
         logToSyncDebug("❌ Error: Falta API Key.");
         return;
     }
@@ -517,6 +516,12 @@ async function syncLeads(isSilent = false) {
     let successCount = 0;
     let failCount = 0;
 
+    const activeHeaders = {
+        'Content-Type': 'application/json',
+        'api-key': apiKey,
+        'env': apiEnv
+    };
+
     for (let i = 0; i < pendingLeads.length; i++) {
         const lead = pendingLeads[i];
         syncBtn.textContent = `Enviando ${i + 1}/${pendingLeads.length}...`;
@@ -524,58 +529,91 @@ async function syncLeads(isSilent = false) {
 
         try {
             const apiPayload = mapLeadToApiPayload(lead);
+            localStorage.setItem('last_api_payload', JSON.stringify(apiPayload, null, 2));
 
-            // EL CAMBIO CLAVE PARA VERCEL:
-            // Usamos nuestro propio servidor como túnel (api/proxy.js)
-            // Esto elimina el problema de CORS al 100%
-            logToSyncDebug(`🚀 Conectando vía Túnel Privado (Vercel)...`);
+            // Lista de proxies para probar en orden
+            // Prioridad 1: corsproxy (Ganador en pruebas)
+            // Prioridad 2: thingproxy (Respaldo)
+            const proxies = [
+                'https://corsproxy.io/?',
+                'https://thingproxy.freeboard.io/fetch/'
+            ];
 
-            const response = await fetch('/api/proxy', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    url: API_CONFIG.URL,
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'api-key': apiKey.trim(),
-                        'env': apiEnv
-                    },
-                    body: apiPayload
-                })
-            });
+            let response;
+            let lastErrorMsg = "";
+            let successRaw = false;
+
+            for (const proxyBase of proxies) {
+                try {
+                    const proxyName = proxyBase.includes('thingproxy') ? 'thingproxy' : 'corsproxy';
+                    logToSyncDebug(`🔄 Probando vía: ${proxyName}...`);
+
+                    const finalUrl = proxyBase + API_CONFIG.URL;
+
+                    const controller = new AbortController();
+                    const timeoutId = setTimeout(() => controller.abort(), 20000); // 20 seg por proxy
+
+                    response = await fetch(finalUrl, {
+                        method: 'POST',
+                        headers: activeHeaders,
+                        body: JSON.stringify(apiPayload),
+                        signal: controller.signal
+                    });
+
+                    clearTimeout(timeoutId);
+
+                    // Si responde algo razonable (incluso 400 Bad Request es una respuesta "válida" de red)
+                    if (response.ok || response.status < 500) {
+                        successRaw = true;
+                        break;
+                    }
+                } catch (err) {
+                    lastErrorMsg = err.message;
+                    logToSyncDebug(`⚠️ ${err.message}`);
+                }
+            }
+
+            if (!successRaw || !response) {
+                throw new Error("Todos los túneles fallaron. Último error: " + lastErrorMsg);
+            }
+
+            const statusText = response.status + ' ' + response.statusText;
+            logToSyncDebug(`📡 Status Server: ${statusText}`);
 
             if (response.ok) {
                 const responseData = await response.json();
-                logToSyncDebug(`✅ Sincronizado vía Vercel.`);
+                logToSyncDebug(`✅ Respuesta Recibida.`);
+                localStorage.setItem('last_api_response', JSON.stringify(responseData, null, 2));
 
                 await db.leads.update(lead.id, {
                     synced: true,
-                    apiLeadId: (responseData.lead_id || "OK"),
+                    // Extract ID logic (Deep Search)
+                    apiLeadId: (() => {
+                        try {
+                            // 1. Busqueda profunda en keys dinamicas (ej: "36": { pubsub: { ... } })
+                            if (responseData && typeof responseData === 'object') {
+                                const keys = Object.keys(responseData);
+                                for (const k of keys) {
+                                    if (responseData[k] && responseData[k].pubsub && responseData[k].pubsub.process_leadID) {
+                                        return responseData[k].pubsub.process_leadID;
+                                    }
+                                }
+                            }
+                            // 2. Busqueda directa
+                            return responseData.lead_id || responseData.id || responseData.leadId || "OK";
+                        } catch (e) { return "OK"; }
+                    })(),
                     apiResponse: responseData,
                     sentPayload: apiPayload
                 });
                 successCount++;
             } else {
-                logToSyncDebug(`⚠️ El túnel falló (Status: ${response.status}). Probando respaldo...`);
-                // Fallback a los proxies públicos por si acaso
-                const fallbackUrl = "https://api.allorigins.win/raw?url=" + encodeURIComponent(API_CONFIG.URL);
-                const fbRes = await fetch(fallbackUrl, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json', 'api-key': apiKey.trim(), 'env': apiEnv },
-                    body: JSON.stringify(apiPayload)
-                });
-                if (fbRes.ok) {
-                    logToSyncDebug(`✅ Sincronizado vía Respaldo.`);
-                    successCount++;
-                    const fbData = await fbRes.json();
-                    await db.leads.update(lead.id, { synced: true, apiLeadId: (fbData.lead_id || "OK") });
-                } else {
-                    logToSyncDebug(`❌ Error definitivo.`);
-                    failCount++;
-                }
+                const errorText = await response.text();
+                logToSyncDebug(`❌ Error Server: ${errorText.substring(0, 50)}`);
+                failCount++;
             }
         } catch (error) {
-            logToSyncDebug(`❌ Error Crítico: ${error.message}`);
+            logToSyncDebug(`❌ Error: ${error.message}`);
             failCount++;
         }
     }
@@ -588,48 +626,38 @@ async function syncLeads(isSilent = false) {
     logToSyncDebug(`--- Fin: ${successCount} OK, ${failCount} Errores ---`);
 }
 
-// Province Mapping (BIRT Annex D - Official ISO Codes)
+// Province Mapping
 const PROVINCE_ISO_MAP = {
     "Álava": "ES-VI", "Albacete": "ES-AB", "Alicante": "ES-A", "Almería": "ES-AL", "Asturias": "ES-O", "Ávila": "ES-AV", "Badajoz": "ES-BA",
     "Baleares": "ES-PM", "Palma": "ES-PM", "Barcelona": "ES-B", "Burgos": "ES-BU", "Cáceres": "ES-CC", "Cádiz": "ES-CA", "Cantabria": "ES-S",
-    "Castellón": "ES-CS", "Ciudad Real": "ES-CR", "Córdoba": "ES-CO", "La Coruña": "ES-C", "Coruña": "ES-C", "Cuenca": "ES-CU", "Gerona": "ES-GI", "Girona": "ES-GI",
-    "Granada": "ES-GR", "Guadalajara": "ES-GU", "Guipúzcoa": "ES-SS", "Gipuzkoa": "ES-SS", "Huelva": "ES-H", "Huesca": "ES-HU", "Jaén": "ES-J", "León": "ES-LE",
-    "Lérida": "ES-L", "Lleida": "ES-L", "Lugo": "ES-LU", "Madrid": "ES-M", "Málaga": "ES-MA", "Murcia": "ES-MU", "Navarra": "ES-NA", "Orense": "ES-OR",
-    "Ourense": "ES-OR", "Palencia": "ES-P", "Las Palmas": "ES-GC", "Pontevedra": "ES-PO", "La Rioja": "ES-LO", "Salamanca": "ES-SA", "Segovia": "ES-SG",
-    "Sevilla": "ES-SE", "Soria": "ES-SO", "Tarragona": "ES-T", "Santa Cruz de Tenerife": "ES-TF", "Teruel": "ES-TE", "Toledo": "ES-TO", "Valencia": "ES-V",
-    "Valladolid": "ES-VA", "Vizcaya": "ES-BI", "Bizkaia": "ES-BI", "Zamora": "ES-ZA", "Zaragoza": "ES-Z", "Ceuta": "ES-CE", "Melilla": "ES-ML"
+    "Castellón": "ES-CS", "Ciudad Real": "ES-CR", "Córdoba": "ES-CO", "Coruña": "ES-C", "Cuenca": "ES-CU", "Gipuzkoa": "ES-SS", "Girona": "ES-GI",
+    "Granada": "ES-GR", "Guadalajara": "ES-GU", "Huelva": "ES-H", "Huesca": "ES-HU", "Jaén": "ES-J", "León": "ES-LE", "Lleida": "ES-L",
+    "Lugo": "ES-LU", "Madrid": "ES-M", "Málaga": "ES-MA", "Murcia": "ES-MU", "Navarra": "ES-NA", "Ourense": "ES-OR", "Palencia": "ES-P",
+    "Las Palmas": "ES-GC", "Pontevedra": "ES-PO", "La Rioja": "ES-LO", "Salamanca": "ES-SA", "Segovia": "ES-SG", "Sevilla": "ES-SE", "Soria": "ES-SO",
+    "Tarragona": "ES-T", "Santa Cruz de Tenerife": "ES-TF", "Teruel": "ES-TE", "Toledo": "ES-TO", "Valencia": "ES-V", "Valladolid": "ES-VA",
+    "Bizkaia": "ES-BI", "Bilbao": "ES-BI", "Zamora": "ES-ZA", "Zaragoza": "ES-Z", "Ceuta": "ES-CE", "Melilla": "ES-ML"
 };
 
-async function getClientIP() {
-    try {
-        const response = await fetch('https://api.ipify.org?format=json');
-        const data = await response.json();
-        return data.ip;
-    } catch (e) { return "127.0.0.1"; }
-}
-
-async function mapLeadToApiPayload(lead) {
+function mapLeadToApiPayload(lead) {
     const map = getPrograms();
     const programData = map[lead.program] || { id: "", dedication: "" };
-    const clientIP = await getClientIP();
 
     let provinceISO = "";
     if (lead.country === 'ES' && lead.province) {
         provinceISO = PROVINCE_ISO_MAP[lead.province] || "ES-M";
     }
 
-    // Official Study Levels (API leads documentation p. 5: Format XX-Y)
     const STUDY_LEVEL_MAP = {
         "Bachillerato": "ES-4",
-        "FP": "ES-5",
+        "FP": "FM-1",
         "Grado": "ES-6",
         "Master": "MA-1"
     };
 
-    return {
-        "process_brand": (localStorage.getItem('config_brand_id') || "unie").toLowerCase(),
+    const payload = {
+        "process_brand": localStorage.getItem('config_brand_id') || "unie",
         "process_type": "SI",
-        "process_origin": String(localStorage.getItem('config_origin') || "4"),
+        "process_origin": localStorage.getItem('config_origin') || "4",
         "process_campaignCode": localStorage.getItem('config_campaign') || "I10002S0003",
         "lead_name": lead.firstName,
         "lead_surname": lead.lastName,
@@ -640,19 +668,20 @@ async function mapLeadToApiPayload(lead) {
         "lead_provinceISO": provinceISO,
         "lead_age": String(lead.age || "25"),
         "lead_sex": localStorage.getItem('config_sex') || "Man",
-        "lead_ip": clientIP,
-        "lead_postCode": lead.country === 'ES' ? (localStorage.getItem('config_postcode') || "28000") : "",
         "study_level": STUDY_LEVEL_MAP[lead.studyLevel] || "ES-6",
         "program_idProduct": String(programData.id),
         "program_idDedication": String(programData.dedication),
-        "program_idCampus": String(localStorage.getItem('config_campus') || "1"),
-        "program_idImpartation": String(localStorage.getItem('config_impartation') || "1"),
-        "program_idTiming": String(localStorage.getItem('config_timing') || "1"),
+        "program_idCampus": localStorage.getItem('config_campus') || "1",
+        "program_idImpartation": localStorage.getItem('config_impartation') || "1",
+        "program_idTiming": localStorage.getItem('config_timing') || "1",
         "rgpd_acceptThirdParties": "0",
         "rgpd_acceptGroup": "0",
         "rgpd_acceptContact": lead.privacy ? "1" : "0",
         "process_requestDate": new Date(lead.date).toISOString().slice(0, 19).replace('T', ' ')
     };
+
+    if (lead.country === 'ES') payload["lead_postCode"] = localStorage.getItem('config_postcode') || "28000";
+    return payload;
 }
 
 function showToast(message, type = 'info') {
