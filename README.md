@@ -4,41 +4,53 @@ Aplicación Web Progresiva (PWA) de alto rendimiento diseñada específicamente 
 
 ## 🛡️ Características "Anti-Balas" (Seguridad de Datos)
 
-Esta app ha sido diseñada para ser extremadamente robusta y evitar cualquier pérdida de información:
+# UNIE Lead Capture App (v18.0)
 
-*   **⚡ Auto-Guardado de Borradores**: Si el iPad se apaga o se cierra la pestaña mientras alguien escribe, los datos se recuperan automáticamente al reabrir la app.
-*   **🔌 Funcionamiento Offline-First**: Los datos se guardan en el almacenamiento físico del dispositivo (`IndexedDB`) de forma inmediata. No dependes de internet para asegurar el lead.
-*   **🔋 Resistencia a Fallos**: Los datos se graban en disco, no en la memoria RAM, por lo que sobreviven a reinicios, falta de batería o cierres inesperados.
-*   **🔒 Bloqueo de Salida Accidental**: La app avisa al usuario si intenta cerrar la ventana teniendo leads pendientes de sincronizar.
-*   **🧼 Sanitización de Seguridad (Anti-XSS)**: Protección contra inyección de código malicioso en los campos de texto.
+PWA optimizada para la captura de leads en stands y eventos, sincronizada con la API de Planeta Formación y Universidades. Diseñada para garantizar que los datos lleguen como **Leads de alta calidad** (no Pre-leads) al CRM Dynamics y BIRT.
 
-## 🤖 Protección Anti-Bots
+## 🚀 Características Principales
 
-Para evitar leads basura o ataques automatizados en la web:
+### 💎 Integración Pro-Lead (Calidad CRM)
+- **Trazabilidad Total**: Envío de IP del terminal, URL de origen y texto legal exacto aceptado.
+- **Mapeo de Calidad**: 
+    - Estados de estudio homologados (`ES-12` para Máster, etc.).
+    - Sexo numérico (`1`/`2`) para compatibilidad directa con Dynamics.
+    - Doble validación de provincia (ISO + Texto).
+    - Marca forzada a `UNIE` (Mayúsculas) para correcta atribución.
 
-1.  **Honeypot (Invisible)**: Un campo trampa que solo los bots ven y rellenan, permitiendo descartar sus envíos automáticamente.
-2.  **Time Trap**: Bloqueo de envíos realizados en menos de 2 segundos (velocidad no humana).
+### 📡 Sincronización Inteligente
+- **Offline-First**: Los leads se guardan localmente en el iPad si no hay internet.
+- **Auto-Sync**: Sincronización automática silenciosa al recuperar la conexión.
+- **Túnel Vercel**: Uso de serverless functions para evitar problemas de CORS y bloqueos de red.
 
-## 📱 Instalación y Uso como App Nativa
+### 🛡️ Control de Flujo (Anti-Saturación)
+- **Rate Limiting**: Límite de seguridad de **100 leads por cada 30 minutos** para el envío automático/estándar.
+- **Envío Masivo**: Opción de forzar el envío total de la cola mediante una clave de seguridad.
 
-Para una experiencia óptima en **iPad o iPhone**:
+### ⚙️ Administración en Dos Niveles
+1. **Ajustes Stand**: Gestión rápida de programas y código de campaña para el personal del evento.
+2. **Sistema (IT)**: Configuración crítica de API Keys, entornos (PRE/PROD) e IDs técnicos, bloqueada para personal no autorizado.
 
-1.  Abre la URL de la aplicación en **Safari**.
-2.  Pulsa el botón **Compartir** (icono cuadrado con flecha hacia arriba).
-3.  Selecciona **"Añadir a pantalla de inicio"**.
-4.  ¡Listo! La app aparecerá en tu escritorio y funcionará a pantalla completa, con icono propio y sin barras de navegador.
+## 🔑 Credenciales de Seguridad
 
-## ⚙️ Panel de Administración y Configuración
+| Acción | Contraseña |
+| :--- | :--- |
+| **Acceso Panel Admin (Candado)** | `unie321` |
+| **Acceso a SISTEMA (Ajustes IT)** | `adminunie` |
+| **Ejecutar ENVÍO MASIVO** | `UNIEMAS` |
+| **BORRAR TODO (Vaciado DB)** | `borradomax` |
 
-Accede mediante el icono del candado (🔒) en la pantalla principal:
--   **Contraseña Admin**: `unie321`
--   **Contraseña de Borrado Crítico**: `borradomax`
+## 🛠️ Instalación en iPad/iPhone
+1. Abre la URL en Safari.
+2. Pulsa el botón **Compartir** (cuadrado con flecha).
+3. Selecciona **"Añadir a la pantalla de inicio"**.
+4. Abre la App desde el icono del escritorio para usarla a pantalla completa y sin barras de navegación.
 
-### Funciones disponibles:
--   **Sincronización Inteligente**: Envía los leads acumulados a la API de Planeta mediante túneles seguros que evitan bloqueos de red.
--   **Exportación**: Descarga todos los leads en formato **Excel (.xlsx)** en cualquier momento.
--   **Gestor de Programas**: Define ID de producto y dedicación para cada carrera de UNIE de forma dinámica.
--   **Configuración Global**: Cambia API Keys, entornos (PRE/PROD), campus y códigos de campaña sin tocar el código.
+## 📋 Requisitos Técnicos
+- **Base de Datos**: Dexie.js (IndexedDB).
+- **Hoja de Estilos**: Vanilla CSS con efectos Glassmorphism.
+- **Backend**: Vercel Serverless (Proxy API).
+- **Excel**: Exportación nativa mediante SheetJS.
 
 ---
-*Desarrollado para UNIE Universidad - Eficiencia y Seguridad en Captación de Leads.*
+*Desarrollado para asegurar el flujo de datos entre eventos presenciales y el ecosistema Business Intelligence (BIRT) de Planeta Formación.*
